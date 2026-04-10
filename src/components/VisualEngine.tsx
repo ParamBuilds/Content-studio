@@ -3,21 +3,11 @@ import { useContent } from '../ContentContext';
 import { Platform } from '../types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ImageIcon, Video, Film, Scissors, Wand2, Loader2 } from 'lucide-react';
+import { ImageIcon, Video, Film, Scissors, Wand2, Loader2, AlertCircle } from 'lucide-react';
 import { generateVideo, generateImage } from '../lib/gemini';
 import { motion } from 'motion/react';
-import { KeyRound, ExternalLink } from 'lucide-react';
-
-declare global {
-  interface Window {
-    aistudio: {
-      hasSelectedApiKey: () => Promise<boolean>;
-      openSelectKey: () => Promise<void>;
-    };
-  }
-}
 
 interface VisualEngineProps {
   platform: Platform;
@@ -31,83 +21,31 @@ export const VisualEngine: React.FC<VisualEngineProps> = ({ platform }) => {
   const [generatedUrl, setGeneratedUrl] = React.useState<string | null>(null);
   const [imageSize, setImageSize] = React.useState<'1K' | '2K' | '4K'>('1K');
   const [aspectRatio, setAspectRatio] = React.useState<'1:1' | '16:9' | '9:16' | '4:5'>('1:1');
-  const [hasApiKey, setHasApiKey] = React.useState<boolean | null>(null);
-
-  React.useEffect(() => {
-    const checkKey = async () => {
-      if (window.aistudio) {
-        const hasKey = await window.aistudio.hasSelectedApiKey();
-        setHasApiKey(hasKey);
-      } else {
-        setHasApiKey(true); // Fallback for local dev if needed
-      }
-    };
-    checkKey();
-  }, []);
-
-  const handleSelectKey = async () => {
-    if (window.aistudio) {
-      await window.aistudio.openSelectKey();
-      setHasApiKey(true); // Assume success per skill instructions
-    }
-  };
+  const [error, setError] = React.useState<string | null>(null);
 
   const handleGenerate = async () => {
-    if (!hasApiKey) {
-      await handleSelectKey();
-    }
-    
+    setError(null);
     setIsGenerating(true);
     try {
-      if (mode === 'text-to-video') {
-        const url = await generateVideo(prompt || topic, aspectRatio === '16:9' || aspectRatio === '9:16' ? aspectRatio : '16:9');
-        setGeneratedUrl(url);
+      if (mode === 'text-to-video' || mode === 'image-to-video') {
+        setError('Video generation requires a specialised paid AI service and is not available with your current RapidAPI plan. Use Text → Image instead.');
+        return;
       } else if (mode === 'text-to-image') {
         const url = await generateImage(prompt || topic, imageSize, aspectRatio);
-        setGeneratedUrl(url);
+        if (url) setGeneratedUrl(url);
+        else setError('Image generation returned no result. Check your RapidAPI key and subscription.');
       } else {
-        // Mock for other modes for now
-        await new Promise(r => setTimeout(r, 2000));
-        setGeneratedUrl('https://picsum.photos/seed/contentstudio/800/450');
+        // video-to-images: not implemented
+        setError('This mode requires video upload functionality, coming soon.');
       }
-    } catch (error: any) {
-      if (error.message?.includes("Requested entity was not found")) {
-        setHasApiKey(false);
-      }
-      console.error("Generation failed:", error);
+    } catch (err: any) {
+      console.error('Generation failed:', err);
+      setError(err.message || 'Generation failed. Check console for details.');
     } finally {
       setIsGenerating(false);
     }
   };
 
-  if (hasApiKey === false) {
-    return (
-      <div className="flex flex-col items-center justify-center p-8 border-2 border-dashed border-zinc-200 dark:border-zinc-800 rounded-xl bg-zinc-50 dark:bg-zinc-900/50 space-y-4 text-center">
-        <div className="p-3 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-600">
-          <KeyRound className="w-6 h-6" />
-        </div>
-        <div className="space-y-1">
-          <h3 className="font-semibold">API Key Required</h3>
-          <p className="text-sm text-zinc-500 max-w-[280px]">
-            High-quality image and video generation requires a paid Gemini API key.
-          </p>
-        </div>
-        <div className="flex flex-col gap-2 w-full max-w-[240px]">
-          <Button onClick={handleSelectKey} className="w-full gap-2">
-            Select API Key
-          </Button>
-          <a 
-            href="https://ai.google.dev/gemini-api/docs/billing" 
-            target="_blank" 
-            rel="noopener noreferrer"
-            className="text-[10px] text-zinc-400 hover:text-blue-500 flex items-center justify-center gap-1"
-          >
-            Learn about billing <ExternalLink className="w-2.5 h-2.5" />
-          </a>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="space-y-4">
@@ -139,7 +77,7 @@ export const VisualEngine: React.FC<VisualEngineProps> = ({ platform }) => {
               onChange={(e) => setPrompt(e.target.value)}
               className="flex-1"
             />
-            <Button onClick={handleGenerate} disabled={isGenerating || hasApiKey === null}>
+            <Button onClick={handleGenerate} disabled={isGenerating}>
               {isGenerating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4 mr-2" />}
               {isGenerating ? 'Generating...' : 'Generate'}
             </Button>
@@ -190,6 +128,13 @@ export const VisualEngine: React.FC<VisualEngineProps> = ({ platform }) => {
               </Select>
             </div>
           </div>
+
+          {error && (
+            <div className="flex items-start gap-3 p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-sm text-red-700 dark:text-red-400">
+              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+              <p>{error}</p>
+            </div>
+          )}
 
           {generatedUrl && (
             <motion.div 

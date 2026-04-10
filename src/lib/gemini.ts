@@ -1,12 +1,31 @@
-import { GoogleGenAI, ThinkingLevel, Type } from "@google/genai";
 import { Platform, Tone, AIReviewResponse } from "../types";
 
-// Standard AI instance for general tasks
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+// ──────────────────────────────────────────────────────────────
+// Internal helper: call the server-side text generation endpoint
+// (uses OpenRouter on the back-end)
+// ──────────────────────────────────────────────────────────────
+const generateText = async (
+  prompt: string,
+  systemPrompt?: string
+): Promise<string> => {
+  const response = await fetch("/api/generate/text", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ prompt, systemPrompt }),
+  });
 
-// Helper to get a fresh AI instance for models requiring user-selected keys
-const getHighQualityAI = () => new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: response.statusText }));
+    throw new Error(err.error || "Text generation failed");
+  }
 
+  const data = await response.json();
+  return data.text || "";
+};
+
+// ──────────────────────────────────────────────────────────────
+// Fetch a prompt template from the server's /api/prompts/:id
+// ──────────────────────────────────────────────────────────────
 const fetchPrompt = async (id: string, variables: Record<string, any>) => {
   try {
     const response = await fetch(`/api/prompts/${id}`);
@@ -14,7 +33,7 @@ const fetchPrompt = async (id: string, variables: Record<string, any>) => {
     let content = data.content || "";
     // Remove markdown header if present
     content = content.replace(/^# .*\n/, "");
-    // Replace variables
+    // Replace template variables
     Object.entries(variables).forEach(([key, value]) => {
       content = content.replaceAll(`\${${key}}`, String(value));
     });
@@ -25,20 +44,43 @@ const fetchPrompt = async (id: string, variables: Record<string, any>) => {
   }
 };
 
+// ──────────────────────────────────────────────────────────────
+// Extract a JSON structure from an LLM response that may contain
+// markdown code fences or extra prose.
+// ──────────────────────────────────────────────────────────────
+const extractJson = (text: string): string => {
+  // Strip ```json ... ``` or ``` ... ``` blocks
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fenced) return fenced[1].trim();
+  // Look for first { ... } or [ ... ] block
+  const obj = text.match(/\{[\s\S]*\}/);
+  if (obj) return obj[0];
+  const arr = text.match(/\[[\s\S]*\]/);
+  if (arr) return arr[0];
+  return text;
+};
+
+// ──────────────────────────────────────────────────────────────
+// Public API – same signatures as before
+// ──────────────────────────────────────────────────────────────
+
 export const generateCopy = async (
   platform: Platform,
   topic: string,
   tone: Tone,
-  existingCopy?: string
+  _existingCopy?: string
 ) => {
-  const prompt = await fetchPrompt(`${platform}_copy`, { topic, tone });
+  let prompt = await fetchPrompt(`${platform}_copy`, { topic, tone });
 
-  const response = await ai.models.generateContent({
-    model: "gemini-3-flash-preview",
-    contents: prompt,
-  });
+  if (!prompt) {
+    prompt = `Write a ${tone} social media post for ${platform} about: "${topic}".
+Rules:
+- Match the tone (${tone}) and platform norms for ${platform}
+- ${platform === "twitter" ? "Keep it under 280 characters." : ""}
+- Return ONLY the post body. No hashtags, no preamble, no quotes.`;
+  }
 
-  return response.text || "";
+  return await generateText(prompt);
 };
 
 export const generateRedditTitle = async (topic: string) => {
@@ -50,59 +92,59 @@ Rules:
 - Do not use "I" as the first word unless it adds authenticity
 - Return only the title text. No quotes, no preamble.`;
 
-  const response = await ai.models.generateContent({
-    model: "gemini-3-flash-preview",
-    contents: prompt,
-  });
-
-  return response.text || "";
+  return await generateText(prompt);
 };
 
-export const generateHashtags = async (platform: Platform, topic: string, count: number = 5) => {
-  const prompt = await fetchPrompt("hashtags", { platform, topic, count });
+export const generateHashtags = async (
+  platform: Platform,
+  topic: string,
+  count: number = 5
+) => {
+  let prompt = await fetchPrompt("hashtags", { platform, topic, count });
 
-  const response = await ai.models.generateContent({
-    model: "gemini-3-flash-preview",
-    contents: prompt,
-    config: {
-      responseMimeType: "application/json",
-      responseSchema: {
-        type: Type.ARRAY,
-        items: { type: Type.STRING }
-      }
-    }
-  });
+  if (!prompt) {
+    prompt = `Generate ${count} relevant hashtags for a ${platform} post about "${topic}".
+Return ONLY a JSON array of strings, e.g. ["#tag1", "#tag2"]. No explanation.`;
+  }
+
+  const systemPrompt =
+    'Respond with a valid JSON array of hashtag strings only. Example: ["#marketing", "#growth"]';
 
   try {
-    return JSON.parse(response.text || "[]") as string[];
-  } catch (e) {
+    const text = await generateText(prompt, systemPrompt);
+    return JSON.parse(extractJson(text)) as string[];
+  } catch {
     return [];
   }
 };
 
-export const generateVisualIdeas = async (platform: Platform, topic: string, count: number = 3) => {
-  const prompt = await fetchPrompt("visual_ideas", { platform, topic, count });
+export const generateVisualIdeas = async (
+  platform: Platform,
+  topic: string,
+  count: number = 3
+) => {
+  let prompt = await fetchPrompt("visual_ideas", { platform, topic, count });
 
-  const response = await ai.models.generateContent({
-    model: "gemini-3-flash-preview",
-    contents: prompt,
-    config: {
-      responseMimeType: "application/json",
-      responseSchema: {
-        type: Type.ARRAY,
-        items: { type: Type.STRING }
-      }
-    }
-  });
+  if (!prompt) {
+    prompt = `Suggest ${count} creative visual concepts for a ${platform} post about "${topic}".
+Return ONLY a JSON array of strings, each describing one visual idea concisely. No extra explanation.`;
+  }
+
+  const systemPrompt =
+    'Respond with a valid JSON array of strings only. Example: ["A bold flat-design infographic", "A candid behind-the-scenes photo"]';
 
   try {
-    return JSON.parse(response.text || "[]") as string[];
-  } catch (e) {
+    const text = await generateText(prompt, systemPrompt);
+    return JSON.parse(extractJson(text)) as string[];
+  } catch {
     return [];
   }
 };
 
-export const reviewPost = async (platform: Platform, fullPost: string): Promise<AIReviewResponse> => {
+export const reviewPost = async (
+  platform: Platform,
+  fullPost: string
+): Promise<AIReviewResponse> => {
   const prompt = `You are a social media editor. Review this ${platform} post draft and provide actionable feedback.
 
 Post:
@@ -117,112 +159,66 @@ Evaluate:
 4. Platform fit — does this match ${platform}'s tone and norms?
 5. Length — is it appropriately sized for ${platform}?
 
-Return a JSON object:
+Return ONLY a JSON object with this exact structure (no markdown, no code fences):
 {
-  "score": 1-10,
-  "strengths": ["..."],
-  "improvements": ["..."],
+  "score": <number 1-10>,
+  "strengths": ["...", "..."],
+  "improvements": ["...", "..."],
   "revised_version": "Optional improved version of the post"
-}
-No markdown, no explanation, just the JSON object.`;
+}`;
 
-  const response = await ai.models.generateContent({
-    model: "gemini-3.1-pro-preview",
-    contents: prompt,
-    config: {
-      thinkingConfig: { thinkingLevel: ThinkingLevel.HIGH },
-      responseMimeType: "application/json",
-      responseSchema: {
-        type: Type.OBJECT,
-        properties: {
-          score: { type: Type.NUMBER },
-          strengths: { type: Type.ARRAY, items: { type: Type.STRING } },
-          improvements: { type: Type.ARRAY, items: { type: Type.STRING } },
-          revised_version: { type: Type.STRING }
-        },
-        required: ["score", "strengths", "improvements"]
-      } as any
-    }
-  });
+  const systemPrompt =
+    "You are a social media expert. Return only raw valid JSON, no markdown code blocks, no extra text.";
 
   try {
-    return JSON.parse(response.text || "{}") as AIReviewResponse;
-  } catch (e) {
+    const text = await generateText(prompt, systemPrompt);
+    return JSON.parse(extractJson(text)) as AIReviewResponse;
+  } catch {
     return { score: 0, strengths: [], improvements: [] };
   }
 };
 
-export const generateVideo = async (prompt: string, aspectRatio: '16:9' | '9:16' = '16:9') => {
-  const hqAi = getHighQualityAI();
-  let operation = await hqAi.models.generateVideos({
-    model: 'veo-3.1-fast-generate-preview',
-    prompt: prompt,
-    config: {
-      numberOfVideos: 1,
-      resolution: '1080p',
-      aspectRatio: aspectRatio
-    }
+export const generateImage = async (
+  prompt: string,
+  _size: "1K" | "2K" | "4K" = "1K",
+  _aspectRatio: string = "1:1"
+) => {
+  const response = await fetch("/api/generate/image", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ prompt }),
   });
 
-  while (!operation.done) {
-    await new Promise(resolve => setTimeout(resolve, 5000));
-    operation = await hqAi.operations.getVideosOperation({ operation });
+  if (!response.ok) {
+    const err = await response
+      .json()
+      .catch(() => ({ error: response.statusText }));
+    throw new Error(err.error || "Image generation failed");
   }
 
-  return operation.response?.generatedVideos?.[0]?.video?.uri || "";
+  const data = await response.json();
+  return data.url || "";
 };
 
-export const generateImage = async (prompt: string, size: '1K' | '2K' | '4K' = '1K', aspectRatio: string = '1:1') => {
-  const hqAi = getHighQualityAI();
-  const response = await hqAi.models.generateContent({
-    model: 'gemini-3-pro-image-preview',
-    contents: { parts: [{ text: prompt }] },
-    config: {
-      imageConfig: {
-        aspectRatio: aspectRatio as any,
-        imageSize: size as any
-      }
-    }
-  });
-  
-  for (const part of response.candidates?.[0]?.content?.parts || []) {
-    if (part.inlineData) {
-      return `data:image/png;base64,${part.inlineData.data}`;
-    }
-  }
+export const generateVideo = async (
+  _prompt: string,
+  _aspectRatio: "16:9" | "9:16" = "16:9"
+) => {
+  // Video generation requires a specialized (paid) service not available via RapidAPI.
+  // Return empty so the caller can show an appropriate message.
+  console.warn(
+    "Video generation is not available with the current API configuration."
+  );
   return "";
 };
 
-export const analyzeVideo = async (videoUri: string) => {
-  const response = await ai.models.generateContent({
-    model: "gemini-3.1-pro-preview",
-    contents: [
-      { text: "Analyze this video and identify the 5 most visually compelling frames. Return timestamps in seconds for each selected frame." },
-      { fileData: { fileUri: videoUri, mimeType: "video/mp4" } }
-    ],
-    config: {
-      responseMimeType: "application/json",
-      responseSchema: {
-        type: Type.ARRAY,
-        items: { type: Type.NUMBER }
-      }
-    }
-  });
-
-  try {
-    return JSON.parse(response.text || "[]") as number[];
-  } catch (e) {
-    return [];
-  }
+export const analyzeVideo = async (_videoUri: string) => {
+  // Requires Gemini Vision — not available with OpenRouter/RapidAPI setup.
+  return [] as number[];
 };
 
 export const searchGrounding = async (query: string) => {
-  const response = await ai.models.generateContent({
-    model: "gemini-3-flash-preview",
-    contents: query,
-    config: {
-      tools: [{ googleSearch: {} }]
-    }
-  });
-  return response.text || "";
+  return await generateText(
+    `Summarize the most relevant and up-to-date information about: "${query}". Be concise and factual.`
+  );
 };
