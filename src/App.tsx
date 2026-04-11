@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
+import { GradientDots } from '@/components/ui/gradient-dots';
 import { 
   Twitter, 
   Instagram, 
@@ -107,7 +108,17 @@ const Dashboard = () => {
   ];
 
   return (
-    <div className="flex h-screen bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 overflow-hidden relative">
+    <div className={`flex h-screen bg-bg-main text-text-primary overflow-hidden relative theme-${theme} transition-colors duration-500`}>
+      {/* Dynamic Mesh Background */}
+      <div className="mesh-bg opacity-40 forced-dark:opacity-20" />
+      
+      {/* Premium Gradient Dots Background */}
+      <GradientDots 
+        className="opacity-[0.15] dark:opacity-[0.25] pointer-events-none" 
+        backgroundColor="transparent" 
+        duration={45}
+      />
+
       {/* Mobile Overlay */}
       <AnimatePresence>
         {isMobileMenuOpen && (
@@ -116,34 +127,34 @@ const Dashboard = () => {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={() => setIsMobileMenuOpen(false)}
-            className="fixed inset-0 bg-black/50 z-40 lg:hidden backdrop-blur-sm"
+            className="fixed inset-0 bg-black/60 z-40 lg:hidden backdrop-blur-md"
           />
         )}
       </AnimatePresence>
 
-      {/* Sidebar */}
+      {/* Sidebar - Midnight Glass */}
       <aside 
-        className={`fixed lg:relative z-50 h-full border-r border-zinc-200 dark:border-zinc-800 flex flex-col bg-zinc-50/50 dark:bg-zinc-900/50 transition-all duration-300 ease-in-out ${
-          isSidebarCollapsed ? 'w-20' : 'w-64'
+        className={`fixed lg:relative z-50 h-full border-r border-border flex flex-col glass-panel !rounded-none transition-all duration-300 ease-in-out ${
+          isSidebarCollapsed ? 'w-20' : 'w-72'
         } ${
           isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
         }`}
       >
-        <div className={`flex items-center gap-2 px-4 h-20 shrink-0 ${isSidebarCollapsed ? 'justify-center' : ''}`}>
-          <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center shrink-0">
-            <Zap className="w-5 h-5 text-white fill-white" />
+        <div className={`flex items-center gap-3 px-6 h-24 shrink-0 ${isSidebarCollapsed ? 'justify-center' : ''}`}>
+          <div className="w-10 h-10 rounded-xl bg-accent flex items-center justify-center shrink-0 shadow-lg shadow-accent/20">
+            <Zap className="w-6 h-6 text-white fill-white" />
           </div>
           {!isSidebarCollapsed && (
-            <motion.h1 
+            <motion.div 
               initial={{ opacity: 0, x: -10 }}
               animate={{ opacity: 1, x: 0 }}
-              className="text-lg font-bold tracking-tight whitespace-nowrap"
+              className="flex flex-col"
             >
-              Content Studio
-            </motion.h1>
+              <h1 className="text-lg font-bold tracking-tight font-display">Content Studio</h1>
+              <span className="text-[10px] text-accent font-semibold tracking-[0.2em] uppercase">Pro Edition</span>
+            </motion.div>
           )}
           
-          {/* Mobile Close Button */}
           <Button 
             variant="ghost" 
             size="icon" 
@@ -154,130 +165,132 @@ const Dashboard = () => {
           </Button>
         </div>
 
-        <div className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-1">
-          <label className={`text-[10px] font-bold uppercase tracking-widest text-zinc-400 px-4 mb-2 block ${isSidebarCollapsed ? 'text-center px-0' : ''}`}>
-            {isSidebarCollapsed ? '•' : 'Platforms'}
-          </label>
-          {platforms.map((p) => (
-            <SidebarItem
-              key={p.id}
-              icon={p.icon}
-              label={p.label}
-              active={activeTab === p.id}
+        <div className="flex-1 overflow-y-auto custom-scrollbar p-5 space-y-6">
+          <div className="space-y-1">
+            <label className={`text-[10px] font-bold uppercase tracking-widest text-text-muted px-4 mb-3 block ${isSidebarCollapsed ? 'text-center px-0' : ''}`}>
+              {isSidebarCollapsed ? '•' : 'Content Hub'}
+            </label>
+            {platforms.map((p) => (
+              <SidebarItem
+                key={p.id}
+                icon={p.icon}
+                label={p.label}
+                active={activeTab === p.id}
+                onClick={() => {
+                  setActiveTab(p.id);
+                  setIsMobileMenuOpen(false);
+                }}
+                collapsed={isSidebarCollapsed}
+              />
+            ))}
+          </div>
+          
+          <div className="space-y-1">
+            <label className={`text-[10px] font-bold uppercase tracking-widest text-text-muted px-4 mb-3 block ${isSidebarCollapsed ? 'text-center px-0' : ''}`}>
+              {isSidebarCollapsed ? '•' : 'Audio Studio'}
+            </label>
+            <SidebarItem 
+              icon={Sun} 
+              label="Audio (TTS/Note)" 
+              active={activeTab === 'audio'} 
               onClick={() => {
-                setActiveTab(p.id);
+                setActiveTab('audio' as any);
                 setIsMobileMenuOpen(false);
-              }}
+              }} 
               collapsed={isSidebarCollapsed}
             />
-          ))}
-          
-          <Separator className="my-4 bg-zinc-200 dark:border-zinc-800" />
-          <label className={`text-[10px] font-bold uppercase tracking-widest text-zinc-400 px-4 mb-2 block ${isSidebarCollapsed ? 'text-center px-0' : ''}`}>
-            {isSidebarCollapsed ? '•' : 'Insights'}
-          </label>
-          <SidebarItem 
-            icon={BarChart3} 
-            label="Analytics" 
-            active={activeTab === 'analytics'} 
-            onClick={() => {
-              setActiveTab('analytics');
-              setIsMobileMenuOpen(false);
-            }} 
-            collapsed={isSidebarCollapsed}
-          />
+          </div>
 
-          <Separator className="my-4 bg-zinc-200 dark:bg-zinc-800" />
-          <label className={`text-[10px] font-bold uppercase tracking-widest text-zinc-400 px-4 mb-2 block ${isSidebarCollapsed ? 'text-center px-0' : ''}`}>
-            {isSidebarCollapsed ? '•' : 'System'}
-          </label>
-          <SidebarItem 
-            icon={LayoutDashboard} 
-            label="Queue" 
-            active={activeTab === 'queue'} 
-            onClick={() => {
-              setActiveTab('queue');
-              setIsMobileMenuOpen(false);
-            }} 
-            collapsed={isSidebarCollapsed}
-          />
-          <SidebarItem 
-            icon={Settings} 
-            label="Settings" 
-            active={activeTab === 'settings'} 
-            onClick={() => {
-              setActiveTab('settings');
-              setIsMobileMenuOpen(false);
-            }} 
-            collapsed={isSidebarCollapsed}
-          />
-          <SidebarItem 
-            icon={User} 
-            label="Account" 
-            active={activeTab === 'account'} 
-            onClick={() => {
-              setActiveTab('account');
-              setIsMobileMenuOpen(false);
-            }} 
-            collapsed={isSidebarCollapsed}
-          />
+          <div className="space-y-1">
+            <label className={`text-[10px] font-bold uppercase tracking-widest text-text-muted px-4 mb-3 block ${isSidebarCollapsed ? 'text-center px-0' : ''}`}>
+              {isSidebarCollapsed ? '•' : 'Operations'}
+            </label>
+            <SidebarItem 
+              icon={BarChart3} 
+              label="Analytics" 
+              active={activeTab === 'analytics'} 
+              onClick={() => {
+                setActiveTab('analytics');
+                setIsMobileMenuOpen(false);
+              }} 
+              collapsed={isSidebarCollapsed}
+            />
+            <SidebarItem 
+              icon={LayoutDashboard} 
+              label="Asset Queue" 
+              active={activeTab === 'queue'} 
+              onClick={() => {
+                setActiveTab('queue');
+                setIsMobileMenuOpen(false);
+              }} 
+              collapsed={isSidebarCollapsed}
+            />
+          </div>
         </div>
 
-        {/* Collapse Toggle (Desktop) */}
-        <div className="p-4 border-t border-zinc-200 dark:border-zinc-800 hidden lg:block">
-          <Button
-            variant="ghost"
-            className="w-full flex items-center justify-center gap-2 text-zinc-500"
-            onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
-          >
-            <ChevronLeft className={`w-5 h-5 transition-transform duration-300 ${isSidebarCollapsed ? 'rotate-180' : ''}`} />
-            {!isSidebarCollapsed && <span className="text-sm font-medium">Collapse Sidebar</span>}
-          </Button>
+        {/* User Profile Area */}
+        <div className="p-4 border-t border-border bg-bg-secondary/50">
+          {!isSidebarCollapsed ? (
+            <div className="flex items-center gap-3 p-3 rounded-xl hover:bg-bg-tertiary transition-colors cursor-pointer group">
+              <div className="w-10 h-10 rounded-full bg-accent/20 flex items-center justify-center text-accent font-bold">JD</div>
+              <div className="flex flex-col">
+                <span className="text-sm font-semibold">Demo User</span>
+                <span className="text-[10px] text-text-muted">Pro Plan</span>
+              </div>
+              <Settings className="ml-auto w-4 h-4 text-text-muted group-hover:text-accent transition-colors" />
+            </div>
+          ) : (
+            <div className="w-10 h-10 rounded-full bg-accent/20 mx-auto flex items-center justify-center text-accent font-bold cursor-pointer">JD</div>
+          )}
         </div>
       </aside>
 
-      {/* Main Content */}
-      <main className="flex-1 flex flex-col min-w-0">
-        {/* Global Header */}
-        <header className="h-20 border-b border-zinc-200 dark:border-zinc-800 flex items-center px-4 lg:px-8 gap-4 lg:gap-6 bg-white dark:bg-zinc-950 z-10">
-          {/* Mobile Menu Toggle */}
+      {/* Main Content Area */}
+      <main className="flex-1 flex flex-col min-w-0 relative z-10">
+        {/* Modern Top Header */}
+        <header className="h-24 flex items-center px-8 lg:px-12 gap-8 bg-bg-main/50 backdrop-blur-xl border-b border-border">
           <Button 
             variant="ghost" 
             size="icon" 
-            className="lg:hidden shrink-0"
+            className="lg:hidden shrink-0 glass-panel"
             onClick={() => setIsMobileMenuOpen(true)}
           >
-            <Menu className="w-5 h-5" />
+            <Menu className="w-5 h-5 text-text-primary" />
           </Button>
-          <div className="flex-1 relative group">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400 group-focus-within:text-blue-500 transition-colors" />
+
+          <div className="flex-1 relative group max-w-2xl">
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted group-focus-within:text-accent transition-all" />
             <Input 
-              placeholder="What are we creating today? (e.g. Launching my productivity app...)" 
-              className="pl-10 h-12 bg-zinc-50 dark:bg-zinc-900 border-none focus-visible:ring-2 focus-visible:ring-blue-500 transition-all text-base"
+              placeholder="What are we igniting today? (e.g. AI Strategy...)" 
+              className="pl-12 h-14 bg-bg-secondary/50 border-border focus:border-accent text-lg rounded-2xl glass-panel !transition-all !duration-300"
               value={topic}
               onChange={(e) => setTopic(e.target.value)}
             />
           </div>
 
-          <div className="flex items-center gap-4">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={toggleTheme}
-              className="rounded-full w-9 h-9 text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100"
-            >
-              {theme === 'light' ? <Moon className="w-5 h-5" /> : <Sun className="w-5 h-5" />}
-            </Button>
+          <div className="flex items-center gap-6">
+            <div className="flex flex-col items-end">
+              <label className="text-[9px] font-bold uppercase tracking-widest text-text-muted mb-1">Theme</label>
+              <button
+                onClick={toggleTheme}
+                className="w-12 h-6 rounded-full bg-bg-tertiary relative border border-border transition-all"
+              >
+                <motion.div 
+                  animate={{ x: theme === 'light' ? 2 : 24 }}
+                  className="w-4 h-4 rounded-full bg-accent absolute top-1/2 -translate-y-1/2 shadow-lg shadow-accent/40"
+                />
+              </button>
+            </div>
 
-            <Separator orientation="vertical" className="h-8 bg-zinc-200 dark:bg-zinc-800" />
+            <div className="h-10 w-[1px] bg-border" />
 
             <div className="flex flex-col">
-              <label className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 mb-1">Tone</label>
+              <label className="text-[9px] font-bold uppercase tracking-widest text-text-muted mb-1">Director Tone</label>
               <Select value={tone} onValueChange={(v: any) => setTone(v)}>
-                <SelectTrigger className="w-40 h-9 bg-zinc-50 dark:bg-zinc-900 border-none">
+                <SelectTrigger className="w-40 h-10 bg-bg-secondary/50 border-border glass-panel font-medium">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="glass-panel border-border">
                   <SelectItem value="professional">Professional</SelectItem>
                   <SelectItem value="casual">Casual</SelectItem>
                   <SelectItem value="humorous">Humorous</SelectItem>
@@ -286,25 +299,23 @@ const Dashboard = () => {
               </Select>
             </div>
 
-            <Separator orientation="vertical" className="h-8 bg-zinc-200 dark:bg-zinc-800" />
-
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-100 dark:border-emerald-800/50">
-              <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-              <span className="text-xs font-medium text-emerald-700 dark:text-emerald-400">Connected</span>
+            <div className="flex items-center gap-3 px-4 py-2 rounded-xl bg-accent/5 border border-accent/20 glow-shadow">
+              <div className="w-2 h-2 rounded-full bg-accent animate-pulse" />
+              <span className="text-[11px] font-bold text-accent uppercase tracking-wider">Studio Active</span>
             </div>
           </div>
         </header>
 
-        {/* Platform Content */}
-        <div className="flex-1 overflow-hidden relative">
+        {/* Dynamic Studio Window */}
+        <div className="flex-1 overflow-hidden p-6 lg:p-10">
           <AnimatePresence mode="wait">
             <motion.div
               key={activeTab}
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -20 }}
-              transition={{ duration: 0.2 }}
-              className="absolute inset-0"
+              initial={{ opacity: 0, scale: 0.98, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 1.02, y: -10 }}
+              transition={{ duration: 0.3, ease: [0.23, 1, 0.32, 1] }}
+              className="h-full"
             >
               {activeTab === 'analytics' ? (
                 <AnalyticsTab />
@@ -314,6 +325,8 @@ const Dashboard = () => {
                 <SettingsTab />
               ) : activeTab === 'account' ? (
                 <AccountTab />
+              ) : activeTab === ('audio' as any) ? (
+                <div className="h-full flex items-center justify-center text-text-muted italic">Audio Studio Components Mounting...</div>
               ) : (
                 <PlatformTab platform={activeTab} />
               )}

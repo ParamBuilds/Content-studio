@@ -2,16 +2,16 @@ import { Platform, Tone, AIReviewResponse } from "../types";
 
 // ──────────────────────────────────────────────────────────────
 // Internal helper: call the server-side text generation endpoint
-// (uses OpenRouter on the back-end)
 // ──────────────────────────────────────────────────────────────
 const generateText = async (
   prompt: string,
-  systemPrompt?: string
+  platform: string = "general",
+  model?: string
 ): Promise<string> => {
   const response = await fetch("/api/generate/text", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ prompt, systemPrompt }),
+    body: JSON.stringify({ prompt, platform, model }),
   });
 
   if (!response.ok) {
@@ -20,7 +20,8 @@ const generateText = async (
   }
 
   const data = await response.json();
-  return data.text || "";
+  // New server returns { output: ... }
+  return data.output || data.text || "";
 };
 
 // ──────────────────────────────────────────────────────────────
@@ -45,14 +46,11 @@ const fetchPrompt = async (id: string, variables: Record<string, any>) => {
 };
 
 // ──────────────────────────────────────────────────────────────
-// Extract a JSON structure from an LLM response that may contain
-// markdown code fences or extra prose.
+// Extract a JSON structure from an LLM response 
 // ──────────────────────────────────────────────────────────────
 const extractJson = (text: string): string => {
-  // Strip ```json ... ``` or ``` ... ``` blocks
   const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
   if (fenced) return fenced[1].trim();
-  // Look for first { ... } or [ ... ] block
   const obj = text.match(/\{[\s\S]*\}/);
   if (obj) return obj[0];
   const arr = text.match(/\[[\s\S]*\]/);
@@ -61,7 +59,7 @@ const extractJson = (text: string): string => {
 };
 
 // ──────────────────────────────────────────────────────────────
-// Public API – same signatures as before
+// Public API
 // ──────────────────────────────────────────────────────────────
 
 export const generateCopy = async (
@@ -75,24 +73,18 @@ export const generateCopy = async (
   if (!prompt) {
     prompt = `Write a ${tone} social media post for ${platform} about: "${topic}".
 Rules:
-- Match the tone (${tone}) and platform norms for ${platform}
-- ${platform === "twitter" ? "Keep it under 280 characters." : ""}
-- Return ONLY the post body. No hashtags, no preamble, no quotes.`;
+- Match the tone (${tone})
+- Return ONLY the post body. No preamble, no quotes.`;
   }
 
-  return await generateText(prompt);
+  return await generateText(prompt, platform);
 };
 
 export const generateRedditTitle = async (topic: string) => {
-  const prompt = `You are writing a Reddit post title about: "${topic}".
-Rules:
-- Maximum 200 characters
-- Make it curiosity-driven or value-clear
-- Avoid clickbait. Reddit users are perceptive.
-- Do not use "I" as the first word unless it adds authenticity
-- Return only the title text. No quotes, no preamble.`;
+  const prompt = `Write a compelling Reddit post title about: "${topic}". 
+Return only the title text. No quotes.`;
 
-  return await generateText(prompt);
+  return await generateText(prompt, "reddit");
 };
 
 export const generateHashtags = async (
@@ -104,14 +96,11 @@ export const generateHashtags = async (
 
   if (!prompt) {
     prompt = `Generate ${count} relevant hashtags for a ${platform} post about "${topic}".
-Return ONLY a JSON array of strings, e.g. ["#tag1", "#tag2"]. No explanation.`;
+Return ONLY a JSON array of strings.`;
   }
 
-  const systemPrompt =
-    'Respond with a valid JSON array of hashtag strings only. Example: ["#marketing", "#growth"]';
-
   try {
-    const text = await generateText(prompt, systemPrompt);
+    const text = await generateText(prompt, platform);
     return JSON.parse(extractJson(text)) as string[];
   } catch {
     return [];
@@ -126,15 +115,12 @@ export const generateVisualIdeas = async (
   let prompt = await fetchPrompt("visual_ideas", { platform, topic, count });
 
   if (!prompt) {
-    prompt = `Suggest ${count} creative visual concepts for a ${platform} post about "${topic}".
-Return ONLY a JSON array of strings, each describing one visual idea concisely. No extra explanation.`;
+    prompt = `Suggest ${count} visual concepts for a ${platform} post about "${topic}".
+Return ONLY a JSON array of strings.`;
   }
 
-  const systemPrompt =
-    'Respond with a valid JSON array of strings only. Example: ["A bold flat-design infographic", "A candid behind-the-scenes photo"]';
-
   try {
-    const text = await generateText(prompt, systemPrompt);
+    const text = await generateText(prompt, platform);
     return JSON.parse(extractJson(text)) as string[];
   } catch {
     return [];
@@ -145,33 +131,12 @@ export const reviewPost = async (
   platform: Platform,
   fullPost: string
 ): Promise<AIReviewResponse> => {
-  const prompt = `You are a social media editor. Review this ${platform} post draft and provide actionable feedback.
-
-Post:
-"""
-${fullPost}
-"""
-
-Evaluate:
-1. Hook strength — does it grab attention in the first line?
-2. Clarity — is the message clear and specific?
-3. CTA — is there a clear next action for the reader?
-4. Platform fit — does this match ${platform}'s tone and norms?
-5. Length — is it appropriately sized for ${platform}?
-
-Return ONLY a JSON object with this exact structure (no markdown, no code fences):
-{
-  "score": <number 1-10>,
-  "strengths": ["...", "..."],
-  "improvements": ["...", "..."],
-  "revised_version": "Optional improved version of the post"
-}`;
-
-  const systemPrompt =
-    "You are a social media expert. Return only raw valid JSON, no markdown code blocks, no extra text.";
+  const prompt = `Review this ${platform} post draft and provide feedback.
+Post: "${fullPost}"
+Return ONLY a JSON object: { "score": 1-10, "strengths": [], "improvements": [], "revised_version": "" }`;
 
   try {
-    const text = await generateText(prompt, systemPrompt);
+    const text = await generateText(prompt, platform);
     return JSON.parse(extractJson(text)) as AIReviewResponse;
   } catch {
     return { score: 0, strengths: [], improvements: [] };
@@ -186,13 +151,11 @@ export const generateImage = async (
   const response = await fetch("/api/generate/image", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ prompt }),
+    body: JSON.stringify({ prompt, size: _size, aspectRatio: _aspectRatio }),
   });
 
   if (!response.ok) {
-    const err = await response
-      .json()
-      .catch(() => ({ error: response.statusText }));
+    const err = await response.json().catch(() => ({ error: response.statusText }));
     throw new Error(err.error || "Image generation failed");
   }
 
@@ -201,24 +164,49 @@ export const generateImage = async (
 };
 
 export const generateVideo = async (
-  _prompt: string,
-  _aspectRatio: "16:9" | "9:16" = "16:9"
+  prompt: string,
+  image_url?: string
 ) => {
-  // Video generation requires a specialized (paid) service not available via RapidAPI.
-  // Return empty so the caller can show an appropriate message.
-  console.warn(
-    "Video generation is not available with the current API configuration."
-  );
-  return "";
+  const response = await fetch("/api/generate/video", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ prompt, image_url }),
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: response.statusText }));
+    throw new Error(err.error || "Video generation failed");
+  }
+
+  const data = await response.json();
+  let { id, status, url, is_fallback, notice } = data;
+
+  // Poll if not immediately finished
+  if (status !== "succeeded" && id) {
+    while (status !== "succeeded" && status !== "failed") {
+      await new Promise(r => setTimeout(r, 5000));
+      const pollRes = await fetch(`/api/generate/video/${id}`);
+      const pollData = await pollRes.json();
+      status = pollData.status;
+      url = pollData.url;
+      if (pollData.error) throw new Error(pollData.error);
+    }
+  }
+
+  return { 
+    url: url || "", 
+    isFallback: is_fallback || false, 
+    notice: notice || null 
+  };
 };
 
 export const analyzeVideo = async (_videoUri: string) => {
-  // Requires Gemini Vision — not available with OpenRouter/RapidAPI setup.
   return [] as number[];
 };
 
 export const searchGrounding = async (query: string) => {
   return await generateText(
-    `Summarize the most relevant and up-to-date information about: "${query}". Be concise and factual.`
+    `Summarize information about: "${query}".`,
+    "general"
   );
 };

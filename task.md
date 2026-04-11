@@ -1,0 +1,5 @@
+- [x] Update `server.ts` to use Claude 3.5 Sonnet for prompt expansion <!-- id: 0 -->
+- [x] Update `/api/generate/image` to use OpenRouter's Flux or premium models (verified logic uses Claude 3.5 expansion) <!-- id: 1 -->
+- [x] Implement OpenRouter video generation in `/api/generate/video` <!-- id: 2 -->
+- [x] Implement status polling for OpenRouter video generation <!-- id: 3 -->
+- [ ] Verify image and video generation locally <!-- id: 4 -->

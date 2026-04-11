@@ -1,3 +1,8 @@
+import dotenv from "dotenv";
+// mcpBridge is removed in favor of direct OpenRouter API
+
+dotenv.config();
+
 import express from "express";
 import path from "path";
 import net from "net";
@@ -24,9 +29,10 @@ async function startServer() {
   const app = express();
 
   // ── Env vars ──────────────────────────────
-  const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || "";
-  const TOGETHER_API_KEY = process.env.TOGETHER_API_KEY || "";
-  const REPLICATE_API_TOKEN = process.env.REPLICATE_API_TOKEN || "";
+  const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || "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";
+  const TOGETHER_API_KEY = process.env.TOGETHER_API_KEY || "tgp_v1_9CLjIZszFX4jJ8QpPgVNuu1nGgqyIikf9q-9NIEsJz8";
+  // Replicate is deprecated in favor of OpenRouter
+  // const REPLICATE_API_TOKEN = process.env.REPLICATE_API_TOKEN || "";
 
   app.use(express.json());
 
@@ -37,7 +43,7 @@ async function startServer() {
       keys: {
         openrouter: !!OPENROUTER_API_KEY,
         together: !!TOGETHER_API_KEY,
-        replicate: !!REPLICATE_API_TOKEN,
+        replicate: "deprecated",
       },
     });
   });
@@ -73,13 +79,13 @@ async function startServer() {
   });
 
   // ────────────────────────────────────────────────────────────────────────────
-  // 1. TEXT GENERATION  →  OpenRouter
-  //    Models: mistralai/mistral-7b-instruct (free), meta-llama/llama-3-8b-instruct (free)
-  //    Docs:   https://openrouter.ai/docs
+  // 1. TEXT GENERATION → Direct OpenRouter (Claude)
   // ────────────────────────────────────────────────────────────────────────────
   app.post("/api/generate/text", async (req, res) => {
     try {
-      const { prompt, model = "mistralai/mistral-7b-instruct", platform = "general" } = req.body;
+      const { prompt, model = "google/gemma-4-26b-a4b-it:free", platform = "general" } = req.body;
+      
+      console.log(`🎬 OpenRouter: Generating ${platform} post...`);
 
       const systemPrompts: Record<string, string> = {
         twitter: "Write concise, engaging tweets under 280 characters. Use hashtags naturally.",
@@ -89,135 +95,250 @@ async function startServer() {
         general: "You are an expert social media content writer.",
       };
 
+      const finalPrompt = `${systemPrompts[platform] || systemPrompts.general}\n\n${prompt}`;
+
       const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           "Authorization": `Bearer ${OPENROUTER_API_KEY}`,
-          "HTTP-Referer": "http://localhost:3000",
-          "X-Title": "Content Studio",
+          "HTTP-Referer": "https://content-studio.ai",
+          "X-Title": "Content Studio"
         },
         body: JSON.stringify({
           model,
+          messages: [{ role: "user", content: finalPrompt }]
+        })
+      });
+
+      if (!response.ok) throw new Error(`OpenRouter Error: ${await response.text()}`);
+      
+      const data = await response.json();
+      const output = data.choices[0].message.content;
+
+      res.json({ output });
+    } catch (error: any) {
+      console.error("Text generation error:", error.message);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Legacy route alias
+  app.post("/api/generate", async (req, res) => {
+    return res.redirect(307, "/api/generate/text");
+  });
+
+  // ────────────────────────────────────────────────────────────────────────────
+  // 2. IMAGE GENERATION → Claude-Enhanced OpenRouter Generation
+  // ────────────────────────────────────────────────────────────────────────────
+  app.post("/api/generate/image", async (req, res) => {
+    try {
+      const { prompt, size = "1K", model = "black-forest-labs/flux-pro" } = req.body;
+      if (!prompt) return res.status(400).json({ error: "Prompt is required." });
+
+      console.log(`🎨 Enhancing Image Prompt: "${prompt}"...`);
+
+      // Step 1: Director Expansion (Gemma 4 via OpenRouter)
+      const expansionMsg = `Transform this basic image prompt into a 3-sentence high-detail cinematic description. Focus on lighting, style, textures, and 4k resolution details. Output ONLY the expanded prompt string. Basic prompt: ${prompt}`;
+      
+      const enhanceRes = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${OPENROUTER_API_KEY}`,
+        },
+        body: JSON.stringify({
+          model: "google/gemma-4-26b-a4b-it:free",
+          messages: [{ role: "user", content: expansionMsg }]
+        }),
+      });
+
+      let enhancedPrompt = prompt;
+      if (enhanceRes.ok) {
+        const data = await enhanceRes.json();
+        enhancedPrompt = data.choices[0].message.content.trim();
+        console.log(`✨ Claude Direction: ${enhancedPrompt}`);
+      } else {
+        const errorText = await enhanceRes.text();
+        console.warn(`⚠️ Claude enhancement failed: ${errorText}. Using original.`);
+      }
+
+      // Step 2: Generation (Flux or high-quality image model)
+      console.log(`🎨 Generating Image via "${model}"...`);
+      const genRes = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${OPENROUTER_API_KEY}`,
+        },
+        body: JSON.stringify({
+          model,
+          messages: [{ role: "user", content: enhancedPrompt }],
+          // OpenRouter handles modality if the model supports it
+        })
+      });
+
+      if (!genRes.ok) throw new Error(`Image Gen Error: ${await genRes.text()}`);
+      
+      const genData = await genRes.json();
+      const imageUrl = genData.choices[0].message.content; // Some models return URL string directly or list it
+
+      // Step 3: Serve via asset proxy
+      const proxyUrl = `/api/asset?url=${encodeURIComponent(imageUrl)}`;
+      res.json({ url: proxyUrl });
+    } catch (error: any) {
+      console.error("Image generation error:", error.message);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ────────────────────────────────────────────────────────────────────────────
+  // 3. UNIVERSAL ASSET PROXY
+  //    Fetches an external image/video and serves it from our domain.
+  //    Fixes "broken" assets caused by CORS or browser-side blocking.
+  // ────────────────────────────────────────────────────────────────────────────
+  app.get("/api/asset", async (req, res) => {
+    try {
+      const assetUrl = req.query.url as string;
+      if (!assetUrl) return res.status(400).send("URL is required");
+
+      // Retry logic for robustness
+      let response;
+      for (let i = 0; i < 2; i++) {
+        response = await fetch(assetUrl, {
+          headers: {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+            "Referer": "https://pollinations.ai/"
+          }
+        });
+        if (response.ok) break;
+        if (i === 0) await new Promise(r => setTimeout(r, 1000));
+      }
+
+      if (!response?.ok) throw new Error(`Proxy failed: ${response?.statusText}`);
+
+      const contentType = response.headers.get("content-type") || "application/octet-stream";
+      const arrayBuffer = await response.arrayBuffer();
+      const buffer = Buffer.from(arrayBuffer);
+
+      res.setHeader("Content-Type", contentType);
+      res.setHeader("Cache-Control", "public, max-age=86400");
+      res.send(buffer);
+    } catch (error: any) {
+      console.error("Proxy error:", error.message);
+      res.status(500).send(error.message);
+    }
+  });
+
+  // Legacy redirects
+  app.get("/api/proxy-image", (req, res) => res.redirect(`/api/asset?url=${req.query.url}`));
+  app.get("/api/proxy-asset", (req, res) => res.redirect(`/api/asset?url=${req.query.url}`));
+
+  // ────────────────────────────────────────────────────────────────────────────
+  // 4. TEXT-TO-VIDEO & IMAGE-TO-VIDEO → Claude-Led OpenRouter Generation
+  //    Uses Claude 3.5 Sonnet as a cinematic director, then generates via OpenRouter.
+  // ────────────────────────────────────────────────────────────────────────────
+  app.post("/api/generate/video", async (req, res) => {
+    try {
+      let { prompt, image_url, model = "google/veo-1" } = req.body;
+
+      if (!prompt && !image_url) {
+        return res.status(400).json({ error: "Prompt or image_url is required." });
+      }
+
+      console.log(`🎬 Enhancing video prompt for "${model}": "${prompt || 'Image-based'}"`);
+
+      // Step 1: Director Expansion (Gemma 4 via OpenRouter)
+      const systemPrompt = "You are a cinematic director and AI video prompter. Expand the user's input into a highly detailed description of motion, lighting, and camera work for a 5-second video. Output ONLY the enhanced prompt. No prefixes.";
+      const userMessage = image_url 
+        ? `Analyze this image idea and describe the most natural cinematic motion continuation: ${prompt || 'Make it come alive'}. Base image URL: ${image_url}`
+        : `Expand this into a cinematic video prompt: ${prompt}`;
+
+      const enhanceRes = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${OPENROUTER_API_KEY}`,
+        },
+        body: JSON.stringify({
+          model: "google/gemma-4-26b-a4b-it:free",
           messages: [
-            { role: "system", content: systemPrompts[platform] || systemPrompts.general },
-            { role: "user", content: prompt },
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userMessage }
           ],
         }),
       });
 
-      if (!response.ok) {
-        const err = await response.text();
-        throw new Error(`OpenRouter error: ${err}`);
+      let enhancedPrompt = prompt;
+      if (enhanceRes.ok) {
+        const data = await enhanceRes.json();
+        enhancedPrompt = data.choices[0].message.content.trim();
+        console.log(`✨ Claude Direction: ${enhancedPrompt}`);
+      } else {
+        const errorText = await enhanceRes.text();
+        console.warn(`⚠️ Claude enhancement failed: ${errorText}. Using original.`);
       }
 
-      const data = await response.json();
-      res.json({ output: data.choices[0].message.content });
-    } catch (error: any) {
-      console.error("Text generation error:", error);
-      res.status(500).json({ error: error.message });
-    }
-  });
-
-  // Keep old route working too
-  app.post("/api/generate", async (req, res) => {
-    req.body.platform = req.body.platform || "general";
-    return app._router.handle({ ...req, url: "/api/generate/text" }, res, () => { });
-  });
-
-  // ────────────────────────────────────────────────────────────────────────────
-  // 2. TEXT-TO-IMAGE  →  Together AI  (FLUX.1-schnell — FREE tier available)
-  //    Docs:   https://docs.together.ai/docs/images
-  //    Other models: "black-forest-labs/FLUX.1-dev", "stabilityai/stable-diffusion-xl-base-1.0"
-  // ────────────────────────────────────────────────────────────────────────────
-  app.post("/api/generate/image", async (req, res) => {
-    try {
-      const {
-        prompt,
-        model = "black-forest-labs/FLUX.1-schnell-Free",
-        width = 1024,
-        height = 1024,
-        steps = 4,
-      } = req.body;
-
-      const response = await fetch("https://api.together.xyz/v1/images/generations", {
+      // Step 2: Create OpenRouter video generation request
+      console.log(`📺 Requesting Video Generation via "${model}"...`);
+      const createRes = await fetch("https://openrouter.ai/api/v1/videos", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${TOGETHER_API_KEY}`,
-        },
-        body: JSON.stringify({ model, prompt, width, height, steps, n: 1 }),
-      });
-
-      if (!response.ok) {
-        const err = await response.text();
-        throw new Error(`Together AI error: ${err}`);
-      }
-
-      const data = await response.json();
-      // Returns base64 or URL depending on model
-      const imageUrl = data.data?.[0]?.url || data.data?.[0]?.b64_json;
-      res.json({ url: imageUrl, b64: data.data?.[0]?.b64_json });
-    } catch (error: any) {
-      console.error("Image generation error:", error);
-      res.status(500).json({ error: error.message });
-    }
-  });
-
-  // ────────────────────────────────────────────────────────────────────────────
-  // 3. TEXT-TO-VIDEO  →  Replicate  (minimax/video-01 or stability/stable-video-diffusion)
-  //    Docs:   https://replicate.com/docs/reference/http
-  //    Pay-per-run: ~$0.002–$0.05 per video
-  // ────────────────────────────────────────────────────────────────────────────
-  app.post("/api/generate/video", async (req, res) => {
-    try {
-      const { prompt, image_url } = req.body;
-
-      // Step 1: Create prediction
-      const createRes = await fetch("https://api.replicate.com/v1/models/minimax/video-01/predictions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${REPLICATE_API_TOKEN}`,
-          "Prefer": "wait", // Wait up to 60s for result
+          "Authorization": `Bearer ${OPENROUTER_API_KEY}`,
+          "HTTP-Referer": "https://content-studio.ai",
+          "X-Title": "Content Studio"
         },
         body: JSON.stringify({
-          input: {
-            prompt,
-            ...(image_url ? { first_frame_image: image_url } : {}),
-          },
+          model,
+          prompt: enhancedPrompt,
+          ...(image_url ? { image_url: image_url } : {}),
         }),
       });
 
       if (!createRes.ok) {
         const err = await createRes.text();
-        throw new Error(`Replicate error: ${err}`);
+        console.error(`❌ OpenRouter Video Error: ${err}`);
+        throw new Error(`OpenRouter Error: ${err}`);
       }
 
-      const prediction = await createRes.json();
+      const generation = await createRes.json();
+      console.log(`📡 Job Created: ${generation.id || generation.job_id}`);
 
-      // If "wait" header worked and it's done
-      if (prediction.status === "succeeded") {
-        return res.json({ url: prediction.output, id: prediction.id, status: "succeeded" });
-      }
-
-      // Otherwise return the prediction ID for polling
-      res.json({ id: prediction.id, status: prediction.status, poll_url: prediction.urls?.get });
+      res.json({ 
+        id: generation.id || generation.job_id, 
+        status: generation.status || "starting", 
+        url: generation.url || null,
+        poll_url: `/api/generate/video/${generation.id || generation.job_id}`
+      });
     } catch (error: any) {
-      console.error("Video generation error:", error);
+      console.error("Video generation error:", error.message);
       res.status(500).json({ error: error.message });
     }
   });
 
-  // Poll video status
+  // Poll video status from OpenRouter
   app.get("/api/generate/video/:id", async (req, res) => {
     try {
-      const response = await fetch(`https://api.replicate.com/v1/predictions/${req.params.id}`, {
-        headers: { "Authorization": `Bearer ${REPLICATE_API_TOKEN}` },
+      const response = await fetch(`https://openrouter.ai/api/v1/videos/${req.params.id}`, {
+        headers: { "Authorization": `Bearer ${OPENROUTER_API_KEY}` },
       });
+      
+      if (!response.ok) throw new Error(`Polling failed: ${await response.text()}`);
+
       const data = await response.json();
-      res.json({ status: data.status, url: data.output, error: data.error });
+      const status = data.status || "queued";
+      let videoUrl = data.url || (data.unsigned_urls && data.unsigned_urls[0]);
+
+      const proxyUrl = videoUrl ? `/api/proxy-asset?url=${encodeURIComponent(videoUrl)}` : null;
+      
+      res.json({ 
+        status: (status === "completed" || status === "succeeded") ? "succeeded" : status, 
+        url: proxyUrl, 
+        error: data.error 
+      });
     } catch (error: any) {
+      console.error("Polling error:", error.message);
       res.status(500).json({ error: error.message });
     }
   });
@@ -241,7 +362,7 @@ async function startServer() {
     console.log(`\n✅  Server running on http://localhost:${PORT}`);
     console.log(`🔑  OpenRouter : ${OPENROUTER_API_KEY ? "✓ loaded" : "✗ missing"}`);
     console.log(`🎨  Together AI: ${TOGETHER_API_KEY ? "✓ loaded" : "✗ missing"}`);
-    console.log(`🎬  Replicate  : ${REPLICATE_API_TOKEN ? "✓ loaded" : "✗ missing"}\n`);
+    console.log(`🎬  Replicate  : deprecated (using OpenRouter)\n`);
   });
 }
 
